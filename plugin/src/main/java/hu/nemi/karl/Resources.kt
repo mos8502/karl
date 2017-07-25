@@ -7,118 +7,111 @@ private val ANDROID_CONTEXT = ClassName.bestGuess("android.content.Context")
 private val RESOURCES = ClassName.bestGuess("Resources")
 private val CACHE = ParameterizedTypeName.get(WeakHashMap::class.asClassName(), ANDROID_CONTEXT, RESOURCES)
 
-class Symbol(str: String) {
+private class Symbol(str: String) {
     private val parts = str.split(' ')
     val type by lazy { parts[1] }
     val name by lazy { parts[2] }
     val id by lazy { Integer.decode(parts[3]) }
 }
 
-data class Resource(val type: String, val resourceType: TypeName, val name: String, val initializer: CodeBlock.Builder.(id: String) -> Unit) {
+private data class Receiver(val receiverClass: String, val contextAccessor: String)
+
+private data class ResourceType(val type: String, val resourceType: TypeName, val name: String, val initializer: CodeBlock.Builder.(id: String) -> Unit) {
     val className = ClassName.bestGuess(name)
 
-    class TypeBuilder(val resource: Resource) {
-        private val typeSpec = TypeSpec.classBuilder(resource.name)
-                .addProperty(PropertySpec.builder("context", ANDROID_CONTEXT)
-                        .initializer("context")
-                        .build())
-                .primaryConstructor(FunSpec.constructorBuilder()
-                        .addParameter("context", ANDROID_CONTEXT)
-                        .build())
-
-        fun add(name: String) = apply {
-            val id = "R.${resource.type}.$name"
-
-            typeSpec.addProperty(PropertySpec.builder(name, resource.resourceType)
-                    .delegate(CodeBlock.builder()
-                            .add("lazy { ").apply { resource.initializer(this, id) }.add(" }")
-                            .build())
+    private val typeSpecBuilder = TypeSpec.classBuilder(name)
+            .addProperty(PropertySpec.builder("context", ANDROID_CONTEXT)
+                    .initializer("context")
                     .build())
-        }
+            .primaryConstructor(FunSpec.constructorBuilder()
+                    .addParameter("context", ANDROID_CONTEXT)
+                    .build())
 
-        fun build() = typeSpec.build()
+    fun toTypeSpec(propertyNames: Iterable<String>) = with(typeSpecBuilder) {
+        val properties = propertyNames.map { propertyName ->
+            val id = "R.${type}.$propertyName"
+
+            PropertySpec.builder(propertyName, resourceType)
+                    .delegate(CodeBlock.builder()
+                            .add("lazy { ").apply { initializer(this, id) }.add(" }")
+                            .build())
+                    .build()
+        }
+        typeSpecBuilder.addProperties(properties).build()
     }
 }
 
 class Resources {
-    private val resources = mutableMapOf<String, Resource>()
-    private val receivers = mutableMapOf<String, String>()
+    private val symbols = mutableSetOf<Symbol>()
+    private val receivers = mutableSetOf<Receiver>()
+    private val resourceTypes = mutableSetOf<ResourceType>()
 
     fun resource(name: String, resourceType: ClassName, initializer: CodeBlock.Builder.(id: String) -> Unit) = apply {
-        resources.put(name, Resource(name, resourceType, "${name.capitalize()}s", initializer))
+        resourceTypes.add(ResourceType(name, resourceType, "${name.capitalize()}s", initializer))
     }
 
     fun receiver(type: String, context: String) = apply {
-        receivers.put(type, context)
+        receivers.add(Receiver(type, context))
     }
 
-    fun fileBuilder(packageName: String, fileName: String) = KotlinFileBuilder(this, packageName, fileName)
+    fun symbol(symbol: String) = apply {
+        symbols.add(Symbol(symbol))
+    }
 
-    class KotlinFileBuilder(val resources: Resources, packageName: String, fileName: String) {
-        private val containers = resources.resources.map { it.key to Resource.TypeBuilder(it.value) }.toMap()
+    fun toKotlinFile(packageName: String, fileName: String): KotlinFile {
+        val kotlinFile = KotlinFile.builder(packageName, fileName)
 
-        private val kotlinFile = KotlinFile.builder(packageName, fileName).apply {
-            // add Resources container
-            with(TypeSpec.classBuilder("Resources")) {
-                resources.resources.values.forEach {
-                    val property = "${it.type}s"
-                    addProperty(PropertySpec.builder(property, it.className)
-                            .initializer("%T(context)", it.className)
-                            .build())
-                }
-                primaryConstructor(FunSpec.constructorBuilder()
-                        .addParameter("context", ANDROID_CONTEXT)
+        with(TypeSpec.classBuilder("Resources")) {
+            resourceTypes.forEach { resourceType ->
+                val property = "${resourceType.type}s"
+                addProperty(PropertySpec.builder(property, resourceType.className)
+                        .initializer("%T(context)", resourceType.className)
                         .build())
-            }.build().run { addType(this) }
 
-            // add ResourcesTls
-            TypeSpec.objectBuilder("resourcesTls")
-                    .addModifiers(KModifier.PRIVATE)
-                    .superclass(ParameterizedTypeName.get(ThreadLocal::class.asClassName(), CACHE))
-                    .addFun(FunSpec.builder("initialValue")
-                            .addModifiers(KModifier.OVERRIDE)
-                            .returns(CACHE)
-                            .addCode("%[return %T()\n", CACHE)
-                            .addCode("%]")
-                            .build())
-                    .addFun(FunSpec.builder("getResources")
-                            .addParameter("context", ANDROID_CONTEXT)
-                            .returns(RESOURCES)
-                            .addCode(CodeBlock.builder()
-                                    .add("%[return with(get()) {\n")
-                                    .add("%>get(context) ?: %T(context).also {\n", RESOURCES)
-                                    .add("%>put(context, it)\n")
-                                    .add("%<}\n")
-                                    .add("%<}\n")
-                                    .add("%]")
-                                    .build())
-                            .build())
-                    .build().run { addType(this) }
+                kotlinFile.addType(resourceType.toTypeSpec(symbols.filter { it.type == resourceType.type }.map(Symbol::name)))
 
-            // add extension properties to receivers
-            resources.receivers.forEach { receiver, context ->
-                resources.resources.values.forEach { resource ->
-                    val property = "${resource.type}s"
-                    addProperty(PropertySpec.builder("$receiver.${property}", resource.className)
+                receivers.forEach { receiver ->
+
+                    kotlinFile.addProperty(PropertySpec.builder("${receiver.receiverClass}.${property}", resourceType.className)
                             .getter(FunSpec.getterBuilder()
                                     .addCode(CodeBlock.builder()
-                                            .add("%[return resourcesTls.getResources($context).${property}\n")
+                                            .add("%[return resourcesTls.getResources(${receiver.contextAccessor}).${property}\n")
                                             .add("%]")
                                             .build())
                                     .build())
                             .build())
                 }
             }
-        }
 
-        fun addSymbol(symbol: Symbol) {
-            containers.get(symbol.type)?.add(symbol.name)
-        }
+            primaryConstructor(FunSpec.constructorBuilder()
+                    .addParameter("context", ANDROID_CONTEXT)
+                    .build())
 
-        fun build(): KotlinFile {
-            containers.values.forEach { kotlinFile.addType(it.build()) }
-            return kotlinFile.build()
+        }.build().run { kotlinFile.addType(this) }
 
-        }
+        TypeSpec.objectBuilder("resourcesTls")
+                .addModifiers(KModifier.PRIVATE)
+                .superclass(ParameterizedTypeName.get(ThreadLocal::class.asClassName(), CACHE))
+                .addFun(FunSpec.builder("initialValue")
+                        .addModifiers(KModifier.OVERRIDE)
+                        .returns(CACHE)
+                        .addCode("%[return %T()\n", CACHE)
+                        .addCode("%]")
+                        .build())
+                .addFun(FunSpec.builder("getResources")
+                        .addParameter("context", ANDROID_CONTEXT)
+                        .returns(RESOURCES)
+                        .addCode(CodeBlock.builder()
+                                .add("%[return with(get()) {\n")
+                                .add("%>get(context) ?: %T(context).also {\n", RESOURCES)
+                                .add("%>put(context, it)\n")
+                                .add("%<}\n")
+                                .add("%<}\n")
+                                .add("%]")
+                                .build())
+                        .build())
+                .build().run { kotlinFile.addType(this) }
+
+        return kotlinFile.build()
     }
 }

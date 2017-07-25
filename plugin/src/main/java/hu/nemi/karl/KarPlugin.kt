@@ -37,7 +37,7 @@ class KarPlugin : Plugin<Project> {
                     val extensionPackage = processResources.packageForR
                     val extensionsPath = File(processResources.sourceOutputDir, "${extensionPackage.replace('.', File.separatorChar)}${File.separatorChar}ResourcesExt.kt")
 
-                    val fileBuilder = with(Resources()) {
+                    val kotlinFile = with(Resources()) {
                         resource("color", Int::class.asTypeName()) {
                             add("%T.getColor(context, $it)", CONTEXT_COMPAT)
                         }
@@ -65,15 +65,16 @@ class KarPlugin : Plugin<Project> {
                         receiver("android.support.v4.app.Fragment", "context")
 
                         receiver("android.app.Fragment", "context")
-                    }.fileBuilder(extensionPackage, "ResourcesExt.kt")
 
-
-                    BufferedReader(FileReader(processResources.textSymbolOutputFile)).use {
-                        it.forEachLine { line -> fileBuilder.addSymbol(Symbol(line)) }
-                    }
+                        apply {
+                            BufferedReader(FileReader(processResources.textSymbolOutputFile)).use {
+                                it.forEachLine { symbol(it) }
+                            }
+                        }
+                    }.toKotlinFile(extensionPackage, "ResourcesExt.kt")
 
                     FileWriter(extensionsPath).use {
-                        fileBuilder.build().writeTo(it)
+                        kotlinFile.writeTo(it)
                     }
                 }
             }
