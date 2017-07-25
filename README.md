@@ -51,5 +51,5 @@ apply plugin: 'hu.nemi.karl'
 ```
 to build.gradle
 
-Once you build your project ResourcesExt.kt will be generated in your application's package. 
+Once you build your project Karl.kt will be generated in your application's package.
 
