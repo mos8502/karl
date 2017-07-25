@@ -21,7 +21,7 @@ Currently the plugin is not available through online maven repositories.
 1. Publish the plugin to your local maven repo
 
 ```
-/gradlew clean  publishToMavenLocal
+./gradlew clean  publishToMavenLocal
 ```
 2. Make the following changes in build.grade
 
