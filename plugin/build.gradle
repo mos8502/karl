@@ -1,0 +1,53 @@
+apply plugin: 'java-library'
+apply plugin: 'maven-publish'
+apply plugin: 'kotlin'
+
+dependencies {
+    compileOnly gradleApi()
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+    compile "org.jetbrains.kotlin:kotlin-stdlib-jre8:$kotlin_version"
+    compile "com.android.tools.build:gradle:$versions.androidBuildTools"
+
+    compile "com.squareup:kotlinpoet:$versions.kotlinPoet"
+
+}
+
+sourceCompatibility = "1.7"
+targetCompatibility = "1.7"
+
+buildscript {
+    ext.kotlin_version = '1.1.3-2'
+    repositories {
+        mavenCentral()
+    }
+    dependencies {
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+    }
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            groupId 'hu.nemi.karl'
+            artifactId 'karl-plugin'
+            version '0.1'
+            from components.java
+        }
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+compileKotlin {
+    kotlinOptions {
+        jvmTarget = "1.8"
+    }
+}
+
+compileTestKotlin {
+    kotlinOptions {
+        jvmTarget = "1.8"
+    }
+}
