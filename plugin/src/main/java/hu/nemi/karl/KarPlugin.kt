@@ -38,25 +38,15 @@ class KarPlugin : Plugin<Project> {
                     val extensionsPath = File(processResources.sourceOutputDir, "${extensionPackage.replace('.', File.separatorChar)}${File.separatorChar}ResourcesExt.kt")
 
                     val kotlinFile = with(Resources()) {
-                        resource("color", Int::class.asTypeName()) {
-                            add("%T.getColor(context, $it)", CONTEXT_COMPAT)
-                        }
+                        resource("color", Int::class.asTypeName(), "%T.getColor(context, %L)", CONTEXT_COMPAT)
 
-                        resource("drawable", DRAWABLE) {
-                            add("%T.getDrawable(context, $it)", CONTEXT_COMPAT)
-                        }
+                        resource("drawable", DRAWABLE, "%T.getDrawable(context, %L)", CONTEXT_COMPAT)
 
-                        resource("string", String::class.asTypeName()) {
-                            add("context.getString($it)")
-                        }
+                        resource("string", String::class.asTypeName(), "context.getString(%L)")
 
-                        resource("dimen", Float::class.asTypeName()) {
-                            add("context.resources.getDimension($it)")
-                        }
+                        resource("dimen", Float::class.asTypeName(), "context.resources.getDimension(%L)")
 
-                        resource("int", Int::class.asTypeName()) {
-                            add("context.resources.getInteger($it)")
-                        }
+                        resource("int", Int::class.asTypeName(), "context.resources.getInteger(%L)")
 
                         receiver("android.content.Context", "this")
 

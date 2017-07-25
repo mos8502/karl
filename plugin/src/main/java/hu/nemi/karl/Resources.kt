@@ -16,7 +16,7 @@ private class Symbol(str: String) {
 
 private data class Receiver(val receiverClass: String, val contextAccessor: String)
 
-private data class ResourceType(val type: String, val resourceType: TypeName, val name: String, val initializer: CodeBlock.Builder.(id: String) -> Unit) {
+private data class ResourceType(val type: String, val resourceType: TypeName, val name: String, val initializer: String, val initializerArgs : Array<out Any> = emptyArray<Any>()) {
     val className = ClassName.bestGuess(name)
 
     private val typeSpecBuilder = TypeSpec.classBuilder(name)
@@ -29,11 +29,9 @@ private data class ResourceType(val type: String, val resourceType: TypeName, va
 
     fun toTypeSpec(propertyNames: Iterable<String>) = with(typeSpecBuilder) {
         val properties = propertyNames.map { propertyName ->
-            val id = "R.${type}.$propertyName"
-
             PropertySpec.builder(propertyName, resourceType)
                     .delegate(CodeBlock.builder()
-                            .add("lazy { ").apply { initializer(this, id) }.add(" }")
+                            .add("lazy { $initializer }", *initializerArgs, "R.$type.$propertyName")
                             .build())
                     .build()
         }
@@ -46,8 +44,8 @@ class Resources {
     private val receivers = mutableSetOf<Receiver>()
     private val resourceTypes = mutableSetOf<ResourceType>()
 
-    fun resource(name: String, resourceType: ClassName, initializer: CodeBlock.Builder.(id: String) -> Unit) = apply {
-        resourceTypes.add(ResourceType(name, resourceType, "${name.capitalize()}s", initializer))
+    fun resource(name: String, resourceType: ClassName, initializer: String, vararg args : Any) = apply {
+        resourceTypes.add(ResourceType(name, resourceType, "${name.capitalize()}s", initializer, args))
     }
 
     fun receiver(type: String, context: String) = apply {
@@ -70,12 +68,12 @@ class Resources {
 
                 kotlinFile.addType(resourceType.toTypeSpec(symbols.filter { it.type == resourceType.type }.map(Symbol::name)))
 
-                receivers.forEach { receiver ->
+                receivers.forEach { (receiverClass, contextAccessor) ->
 
-                    kotlinFile.addProperty(PropertySpec.builder("${receiver.receiverClass}.${property}", resourceType.className)
+                    kotlinFile.addProperty(PropertySpec.builder("$receiverClass.$property", resourceType.className)
                             .getter(FunSpec.getterBuilder()
                                     .addCode(CodeBlock.builder()
-                                            .add("%[return resourcesTls.getResources(${receiver.contextAccessor}).${property}\n")
+                                            .add("%[return resourcesTls.getResources($contextAccessor).$property\n")
                                             .add("%]")
                                             .build())
                                     .build())
