@@ -5,15 +5,23 @@ import com.android.build.gradle.AppPlugin
 import com.android.build.gradle.LibraryExtension
 import com.android.build.gradle.LibraryPlugin
 import com.android.build.gradle.api.BaseVariant
+import com.squareup.kotlinpoet.ClassName
+import com.squareup.kotlinpoet.asTypeName
 import org.gradle.api.DomainObjectSet
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import java.io.BufferedReader
 import java.io.File
+import java.io.FileReader
+import java.io.FileWriter
+
+private val CONTEXT_COMPAT = ClassName.bestGuess("android.support.v4.content.ContextCompat")
+private val DRAWABLE = ClassName.bestGuess("android.graphics.drawable.Drawable")
 
 class KarPlugin : Plugin<Project> {
-    override fun apply(project : Project) = with(project) {
+    override fun apply(project: Project) = with(project) {
         plugins.all {
-            when(it) {
+            when (it) {
                 is LibraryPlugin -> applyPlugin(extensions.getByType(LibraryExtension::class.java).libraryVariants)
                 is AppPlugin -> applyPlugin(extensions.getByType(AppExtension::class.java).applicationVariants)
             }
@@ -26,13 +34,47 @@ class KarPlugin : Plugin<Project> {
                 val processResources = output.processResources
                 processResources.doLast {
 
-                    val symbols = processResources.textSymbolOutputFile
                     val extensionPackage = processResources.packageForR
                     val extensionsPath = File(processResources.sourceOutputDir, "${extensionPackage.replace('.', File.separatorChar)}${File.separatorChar}ResourcesExt.kt")
-                    generateResourcesExtension(packageName = extensionPackage,
-                            path = extensionsPath,
-                            symbolsFile = symbols)
 
+                    val fileBuilder = with(Resources()) {
+                        resource("color", Int::class.asTypeName()) {
+                            add("%T.getColor(context, $it)", CONTEXT_COMPAT)
+                        }
+
+                        resource("drawable", DRAWABLE) {
+                            add("%T.getDrawable(context, $it)", CONTEXT_COMPAT)
+                        }
+
+                        resource("string", String::class.asTypeName()) {
+                            add("context.getString($it)")
+                        }
+
+                        resource("dimen", Float::class.asTypeName()) {
+                            add("context.resources.getDimension($it)")
+                        }
+
+                        resource("int", Int::class.asTypeName()) {
+                            add("context.resources.getInteger($it)")
+                        }
+
+                        receiver("android.content.Context", "this")
+
+                        receiver("android.view.View", "context")
+
+                        receiver("android.support.v4.app.Fragment", "context")
+
+                        receiver("android.app.Fragment", "context")
+                    }.fileBuilder(extensionPackage, "ResourcesExt.kt")
+
+
+                    BufferedReader(FileReader(processResources.textSymbolOutputFile)).use {
+                        it.forEachLine { line -> fileBuilder.addSymbol(Symbol(line)) }
+                    }
+
+                    FileWriter(extensionsPath).use {
+                        fileBuilder.build().writeTo(it)
+                    }
                 }
             }
         }
